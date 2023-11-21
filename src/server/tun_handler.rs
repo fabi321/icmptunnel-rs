@@ -1,23 +1,23 @@
-use std::collections::HashMap;
-use std::io;
-use std::net::IpAddr;
-use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender};
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::PrimitiveValues;
-use pnet::packet::icmp::IcmpPacket;
-use tun_tap::Iface;
 use crate::constants::MAX_PAYLOAD_SIZE;
 use crate::icmp_packets::{IcmpReply, IcmpTooBig};
 use crate::server::UserUpdate;
 use crate::shared::ids_to_sequence_number;
 use crate::shared::packages::DataPacket;
+use pnet::packet::icmp::IcmpPacket;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::PrimitiveValues;
+use std::collections::HashMap;
+use std::io;
+use std::net::IpAddr;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
+use tun_tap::Iface;
 
 pub struct TunHandler {
     icmp_tx: Sender<Option<(IcmpPacket<'static>, IpAddr)>>,
     tun_rx: Receiver<UserUpdate>,
     tunnel: Arc<Iface>,
-    users: HashMap<u8, (u8, IpAddr, [u8; 32], u16)>
+    users: HashMap<u8, (u8, IpAddr, [u8; 32], u16)>,
 }
 
 impl TunHandler {
@@ -40,7 +40,7 @@ impl TunHandler {
         'main: while let Ok(packet_size) = self.tunnel.recv(&mut buf) {
             while let Ok(message) = self.tun_rx.try_recv() {
                 if self.update_users(message) {
-                    break 'main
+                    break 'main;
                 }
             }
 
@@ -53,8 +53,10 @@ impl TunHandler {
 
     fn send_data(&self, buf: &[u8; MAX_PAYLOAD_SIZE + 4], size: usize) -> io::Result<()> {
         // Get ipv4 packet for retrieving destination address and checking in general
-        let packet = Ipv4Packet::new(&buf[4..size])
-            .ok_or(io::Error::new(io::ErrorKind::InvalidData, "Not a valid ipv4 packet"))?;
+        let packet = Ipv4Packet::new(&buf[4..size]).ok_or(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Not a valid ipv4 packet",
+        ))?;
         if packet.get_version() != 4 {
             return Err(io::Error::new(
                 io::ErrorKind::AddrNotAvailable,
@@ -68,11 +70,14 @@ impl TunHandler {
             icmp_reply.set_next_hop_max_mtu(MAX_PAYLOAD_SIZE as u16 - 4);
             icmp_reply.set_raw(&buf[4..]);
 
-            let _ = self.icmp_tx.send(Some((icmp_reply.to_packet(), IpAddr::from(packet.get_source()))));
+            let _ = self.icmp_tx.send(Some((
+                icmp_reply.to_packet(),
+                IpAddr::from(packet.get_source()),
+            )));
 
             return Err(io::Error::new(
                 io::ErrorKind::OutOfMemory,
-                "Too large packet"
+                "Too large packet",
             ));
         }
 
@@ -83,18 +88,20 @@ impl TunHandler {
             } else {
                 Err(io::Error::new(
                     io::ErrorKind::AddrNotAvailable,
-                    "Can't send to self"
+                    "Can't send to self",
                 ))
             }
         } else {
             Err(io::Error::new(
                 io::ErrorKind::AddrNotAvailable,
-                "not in address range"
+                "not in address range",
             ))
         }?;
 
         // retrieve user
-        let user = self.users.get(&user_id)
+        let user = self
+            .users
+            .get(&user_id)
             .ok_or(io::Error::new(io::ErrorKind::NotFound, "User not found"))?;
 
         // encrypt payload data
@@ -118,13 +125,16 @@ impl TunHandler {
             UserUpdate::AddUser { client_id, user } => {
                 // There should always be at least one session
                 let (session_id, (key, _)) = user.session_keys.into_iter().next().unwrap();
-                self.users.insert(
-                    client_id,
-                    (session_id, user.address, key, user.identifier)
-                );
+                self.users
+                    .insert(client_id, (session_id, user.address, key, user.identifier));
                 false
             }
-            UserUpdate::AddSession { client_id, session_id, session_key, .. } => {
+            UserUpdate::AddSession {
+                client_id,
+                session_id,
+                session_key,
+                ..
+            } => {
                 if let Some(user) = self.users.get_mut(&client_id) {
                     user.0 = session_id;
                     user.2 = session_key;
@@ -147,7 +157,7 @@ impl TunHandler {
                 }
                 false
             }
-            UserUpdate::Stop => {true}
+            UserUpdate::Stop => true,
         }
     }
 }

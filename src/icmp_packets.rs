@@ -1,7 +1,7 @@
 use crate::constants::ICMP_HEADER_LEN;
+use pnet::packet::icmp::destination_unreachable::{IcmpCodes, MutableDestinationUnreachablePacket};
 use pnet::packet::icmp::echo_reply::MutableEchoReplyPacket;
 use pnet::packet::icmp::echo_request::MutableEchoRequestPacket;
-use pnet::packet::icmp::destination_unreachable::{MutableDestinationUnreachablePacket, IcmpCodes};
 use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::Packet;
@@ -74,7 +74,7 @@ impl IcmpRequest {
         self.packet.set_checksum(checksum(self.packet.packet(), 1));
         let vec = Vec::from(self.packet.packet());
         IcmpPacket::owned(vec).unwrap()
-   }
+    }
 }
 
 pub struct IcmpTooBig {

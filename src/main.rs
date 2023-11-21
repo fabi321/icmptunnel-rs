@@ -30,6 +30,9 @@ fn main() {
     let arguments = Arguments::parse();
     match arguments.command {
         Commands::Server { password } => start_server(password),
-        Commands::Client { server_address, password } => start_client(server_address, password),
+        Commands::Client {
+            server_address,
+            password,
+        } => start_client(server_address, password),
     }
 }

@@ -1,12 +1,12 @@
+use crate::client::icmp_handler::IcmpHandler;
+use crate::client::tun_handler::TunHandler;
 use crate::configure_network;
 use crate::shared::get_transport_channel;
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::sync::mpsc::channel;
+use std::sync::Arc;
 use std::thread;
 use tun_tap::{Iface, Mode};
-use crate::client::icmp_handler::IcmpHandler;
-use crate::client::tun_handler::TunHandler;
 
 mod icmp_handler;
 mod tun_handler;
@@ -38,7 +38,7 @@ pub fn start_client(server_address: IpAddr, password: String) {
 
     loop {
         if let Ok(_) = stop_rx.try_recv() {
-            break
+            break;
         }
         println!("authenticating");
         if let Ok(mut icmp_handler) = icmp_handler.auth(&mut transport_rx) {
@@ -46,7 +46,8 @@ pub fn start_client(server_address: IpAddr, password: String) {
             let tunnel = Arc::new(Iface::new("tun0", Mode::Tun).expect("Error creating tunnel"));
             let (tun_tx, tun_rx) = channel();
             icmp_handler.add_tunnel(tunnel.clone(), tun_tx.clone());
-            configure_network::configure_client_network(server_address, icmp_handler.client_id).expect("Error configuring network");
+            configure_network::configure_client_network(server_address, icmp_handler.client_id)
+                .expect("Error configuring network");
 
             let credentials = icmp_handler.get_credentials();
 
@@ -67,15 +68,19 @@ pub fn start_client(server_address: IpAddr, password: String) {
 
             println!("tunnel started, operating now");
             let stop = icmp_handler.run(&mut transport_rx, &stop_rx);
-            println!("stopped due to {}", if stop {"interrupt"} else {"timeout"});
+            println!(
+                "stopped due to {}",
+                if stop { "interrupt" } else { "timeout" }
+            );
 
-            configure_network::restore_client_network(gateway.clone(), interface.clone()).expect("could not restore network");
+            configure_network::restore_client_network(gateway.clone(), interface.clone())
+                .expect("could not restore network");
 
             tun_tx.send(None).expect("could not stop tun thread");
             tun_thread.join().unwrap();
 
             if stop {
-                break
+                break;
             }
         } else {
             println!("Timeout while trying to connect to server")

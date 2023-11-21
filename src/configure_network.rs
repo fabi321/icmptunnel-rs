@@ -81,15 +81,7 @@ pub fn configure_client_network(server: IpAddr, client_id: u8) -> io::Result<()>
     let (gateway, interface) = get_gateway_interface()?;
     Command::new("route")
         .args([
-            "del",
-            "-net",
-            "0.0.0.0",
-            "gw",
-            &gateway,
-            "netmask",
-            "0.0.0.0",
-            "dev",
-            &interface,
+            "del", "-net", "0.0.0.0", "gw", &gateway, "netmask", "0.0.0.0", "dev", &interface,
         ])
         .output()?;
     Command::new("route")

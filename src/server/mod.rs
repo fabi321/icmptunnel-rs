@@ -1,14 +1,14 @@
 use crate::configure_network;
+use crate::server::icmp_handler::IcmpHandler;
+use crate::server::tun_handler::TunHandler;
 use crate::shared::get_transport_channel;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
-use std::time::Instant;
 use std::thread;
+use std::time::Instant;
 use tun_tap::{Iface, Mode};
-use crate::server::icmp_handler::IcmpHandler;
-use crate::server::tun_handler::TunHandler;
 
 mod icmp_handler;
 mod tun_handler;
@@ -54,7 +54,9 @@ pub fn start_server(password: String) {
         configure_network::restore_server_network()
             .expect("Error while restoring network configuration");
         stop_icmp_tx.send(()).expect("couldn't send stop signal");
-        tun_tx_clone.send(UserUpdate::Stop).expect("couldn't send stop signal");
+        tun_tx_clone
+            .send(UserUpdate::Stop)
+            .expect("couldn't send stop signal");
         send_icmp_tx_clone
             .send(None)
             .expect("couldn't send stop signal");
@@ -82,11 +84,7 @@ pub fn start_server(password: String) {
         }
     });
 
-    let mut tun_handler = TunHandler::new(
-        send_icmp_tx,
-        tun_rx,
-        tunnel,
-    );
+    let mut tun_handler = TunHandler::new(send_icmp_tx, tun_rx, tunnel);
     let _tun_thread = thread::spawn(move || {
         tun_handler.run();
     });

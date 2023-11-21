@@ -1,15 +1,15 @@
-use std::io;
-use std::net::IpAddr;
-use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender};
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::PrimitiveValues;
-use pnet::packet::icmp::IcmpPacket;
-use tun_tap::Iface;
 use crate::constants::MAX_PAYLOAD_SIZE;
 use crate::icmp_packets::{IcmpRequest, IcmpTooBig};
 use crate::shared::ids_to_sequence_number;
 use crate::shared::packages::DataPacket;
+use pnet::packet::icmp::IcmpPacket;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::PrimitiveValues;
+use std::io;
+use std::net::IpAddr;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
+use tun_tap::Iface;
 
 pub struct TunHandler {
     tunnel: Arc<Iface>,
@@ -54,7 +54,7 @@ impl TunHandler {
                     self.session_id = session_id;
                     self.key = key;
                 } else {
-                    break 'main
+                    break 'main;
                 }
             }
 
@@ -67,8 +67,10 @@ impl TunHandler {
 
     fn send_data(&self, buf: &[u8; MAX_PAYLOAD_SIZE + 4], size: usize) -> io::Result<()> {
         // Get ipv4 packet for retrieving destination address and checking in general
-        let packet = Ipv4Packet::new(&buf[4..size])
-            .ok_or(io::Error::new(io::ErrorKind::InvalidData, "Not a valid ipv4 packet"))?;
+        let packet = Ipv4Packet::new(&buf[4..size]).ok_or(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Not a valid ipv4 packet",
+        ))?;
         if packet.get_version() != 4 {
             return Err(io::Error::new(
                 io::ErrorKind::AddrNotAvailable,
@@ -84,20 +86,23 @@ impl TunHandler {
 
             println!("{packet:?}");
 
-            let _ = self.icmp_tx.send(Some((icmp_reply.to_packet(), IpAddr::from(packet.get_source()))));
+            let _ = self.icmp_tx.send(Some((
+                icmp_reply.to_packet(),
+                IpAddr::from(packet.get_source()),
+            )));
 
             return Err(io::Error::new(
                 io::ErrorKind::OutOfMemory,
-                "Too large packet"
+                "Too large packet",
             ));
         }
 
         // Filter own packets
         if packet.get_destination().to_primitive_values() == (10, 0, 1, self.client_id) {
             return Err(io::Error::new(
-                    io::ErrorKind::AddrNotAvailable,
-                    "Can't send to self"
-            ))
+                io::ErrorKind::AddrNotAvailable,
+                "Can't send to self",
+            ));
         }
 
         // encrypt payload data
@@ -111,7 +116,9 @@ impl TunHandler {
         icmp_packet.set_sequence_number(ids_to_sequence_number(self.client_id, self.session_id));
         icmp_packet.set_payload(&to_send);
 
-        let _ = self.icmp_tx.send(Some((icmp_packet.to_packet(), self.server_ip)));
+        let _ = self
+            .icmp_tx
+            .send(Some((icmp_packet.to_packet(), self.server_ip)));
 
         Ok(())
     }

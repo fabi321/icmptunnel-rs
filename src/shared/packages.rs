@@ -1,13 +1,16 @@
-use crate::constants::{CHACHA20POLY1305_AUTH_OVERHEAD, CHACHA20_KEY_SIZE, MAX_PAYLOAD_SIZE, CHACHA20_NONCE_SIZE, HEADER_LEN};
+use crate::constants::{
+    CHACHA20POLY1305_AUTH_OVERHEAD, CHACHA20_KEY_SIZE, CHACHA20_NONCE_SIZE, HEADER_LEN,
+    MAX_PAYLOAD_SIZE,
+};
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     ChaCha20Poly1305,
 };
+use rand_core::RngCore;
 use sha3::digest::consts::U64;
 use sha3::digest::generic_array::GenericArray;
 use sha3::{Digest, Sha3_512};
 use std::io;
-use rand_core::RngCore;
 use x25519_dalek::{PublicKey, ReusableSecret, SharedSecret};
 
 fn hash_password_and_key(password: &str, key: &PublicKey) -> GenericArray<u8, U64> {
@@ -23,7 +26,11 @@ fn hash_password_and_key(password: &str, key: &PublicKey) -> GenericArray<u8, U6
 
 fn encrypt_data<const S: usize, const O: usize>(plaintext: [u8; S], key: &[u8; 32]) -> [u8; O] {
     #[cfg(debug_assertions)]
-    assert_eq!(S + CHACHA20_NONCE_SIZE + CHACHA20POLY1305_AUTH_OVERHEAD, O, "Invalid input and output size");
+    assert_eq!(
+        S + CHACHA20_NONCE_SIZE + CHACHA20POLY1305_AUTH_OVERHEAD,
+        O,
+        "Invalid input and output size"
+    );
     let mut result = [0u8; O];
     let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
     result[..CHACHA20_NONCE_SIZE].copy_from_slice(nonce.as_slice());
@@ -45,7 +52,8 @@ fn decrypt_data(ciphertext: &[u8], key: &[u8; 32]) -> io::Result<Vec<u8>> {
     let cipher = ChaCha20Poly1305::new(key.into());
 
     // Decrypt data
-    cipher.decrypt(&nonce.into(), &ciphertext[CHACHA20_NONCE_SIZE..])
+    cipher
+        .decrypt(&nonce.into(), &ciphertext[CHACHA20_NONCE_SIZE..])
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Decryption failed"))
 }
 
@@ -184,10 +192,10 @@ impl AuthenticationReply {
         let session_id = plaintext[1];
         let session_key = (&plaintext[2..]).try_into().unwrap();
         Ok(AuthenticationReply {
-                dh_key,
-                client_id,
-                session_id,
-                session_key,
+            dh_key,
+            client_id,
+            session_id,
+            session_key,
         })
     }
 }
@@ -202,7 +210,10 @@ impl SessionExtension {
     pub const SIZE: usize = CHACHA20_NONCE_SIZE + CHACHA20POLY1305_AUTH_OVERHEAD + 32 + 1;
 
     pub fn new(new_key: [u8; 32], session_id: u8) -> SessionExtension {
-        SessionExtension { new_key, session_id }
+        SessionExtension {
+            new_key,
+            session_id,
+        }
     }
 
     pub fn to_bytes(self, key: &[u8; 32]) -> [u8; Self::SIZE] {
@@ -213,10 +224,7 @@ impl SessionExtension {
         encrypt_data(plaintext, key)
     }
 
-    pub fn verified_from_bytes(
-        bytes: &[u8],
-        key: &[u8; 32],
-    ) -> io::Result<SessionExtension> {
+    pub fn verified_from_bytes(bytes: &[u8], key: &[u8; 32]) -> io::Result<SessionExtension> {
         if bytes.len() != Self::SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -229,7 +237,10 @@ impl SessionExtension {
         let new_key = (&plaintext[..32]).try_into().unwrap();
         let session_id = plaintext[32];
 
-        Ok(SessionExtension { new_key, session_id })
+        Ok(SessionExtension {
+            new_key,
+            session_id,
+        })
     }
 }
 
@@ -240,7 +251,8 @@ pub struct DataPacket {
 
 impl DataPacket {
     /// Max payload size + poly1305 auth overhead + chacha20 nonce + payload_size header
-    pub const SIZE: usize = MAX_PAYLOAD_SIZE + CHACHA20POLY1305_AUTH_OVERHEAD + CHACHA20_NONCE_SIZE + HEADER_LEN;
+    pub const SIZE: usize =
+        MAX_PAYLOAD_SIZE + CHACHA20POLY1305_AUTH_OVERHEAD + CHACHA20_NONCE_SIZE + HEADER_LEN;
 
     pub fn new(data: Vec<u8>) -> DataPacket {
         DataPacket { data }
@@ -250,8 +262,8 @@ impl DataPacket {
         if self.data.len() > MAX_PAYLOAD_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Data too long for one packet"
-            ))
+                "Data too long for one packet",
+            ));
         }
 
         // Prepare plain text by inserting length and content
@@ -266,10 +278,7 @@ impl DataPacket {
         Ok(encrypt_data(plaintext, key))
     }
 
-    pub fn verified_from_bytes(
-        bytes: &[u8],
-        key: &[u8; 32],
-    ) -> io::Result<DataPacket> {
+    pub fn verified_from_bytes(bytes: &[u8], key: &[u8; 32]) -> io::Result<DataPacket> {
         if bytes.len() != Self::SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -288,8 +297,8 @@ impl DataPacket {
 
 #[cfg(test)]
 mod tests {
-    use x25519_dalek::EphemeralSecret;
     use super::*;
+    use x25519_dalek::EphemeralSecret;
 
     #[test]
     fn test_handshake() {
@@ -404,13 +413,21 @@ mod tests {
         assert!(result.is_err(), "DataPacket accepted too long input");
         let data = Vec::from([0u8; MAX_PAYLOAD_SIZE].as_slice());
         let packet = DataPacket::new(data);
-        let bytes = packet.clone().to_bytes(&key).expect("Failed to compile packet");
-        let received_packet = DataPacket::verified_from_bytes(&bytes, &key).expect("Failed to parse packet");
+        let bytes = packet
+            .clone()
+            .to_bytes(&key)
+            .expect("Failed to compile packet");
+        let received_packet =
+            DataPacket::verified_from_bytes(&bytes, &key).expect("Failed to parse packet");
         assert_eq!(packet, received_packet, "Packets differ");
         let data = Vec::from([0u8; 50].as_slice());
         let packet = DataPacket::new(data);
-        let bytes = packet.clone().to_bytes(&key).expect("Failed to compile packet");
-        let received_packet = DataPacket::verified_from_bytes(&bytes, &key).expect("Failed to parse packet");
+        let bytes = packet
+            .clone()
+            .to_bytes(&key)
+            .expect("Failed to compile packet");
+        let received_packet =
+            DataPacket::verified_from_bytes(&bytes, &key).expect("Failed to parse packet");
         assert_eq!(packet, received_packet, "Packets differ");
     }
 }

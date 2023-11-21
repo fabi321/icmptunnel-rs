@@ -1,20 +1,22 @@
-use std::collections::HashMap;
-use std::io;
-use std::net::IpAddr;
-use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::time::{Duration, Instant};
+use crate::icmp_packets::IcmpRequest;
+use crate::shared::packages::{
+    AuthenticationReply, AuthenticationRequest, DataPacket, SessionExtension,
+};
+use crate::shared::{ids_to_sequence_number, sequence_number_to_ids, RECV_TIMEOUT, TIMEOUT};
 use pnet::packet::icmp::echo_reply::EchoReplyPacket;
 use pnet::packet::icmp::IcmpPacket;
 use pnet::packet::icmp::IcmpTypes::EchoReply;
 use pnet::packet::Packet;
 use pnet::transport::{ipv4_packet_iter, TransportReceiver};
 use rand_core::{OsRng, RngCore};
+use std::collections::HashMap;
+use std::io;
+use std::net::IpAddr;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tun_tap::Iface;
 use x25519_dalek::{PublicKey, ReusableSecret};
-use crate::icmp_packets::IcmpRequest;
-use crate::shared::packages::{AuthenticationReply, AuthenticationRequest, DataPacket, SessionExtension};
-use crate::shared::{ids_to_sequence_number, RECV_TIMEOUT, sequence_number_to_ids, TIMEOUT};
 
 #[derive(Debug)]
 pub struct IcmpHandler {
@@ -32,7 +34,7 @@ impl IcmpHandler {
         IcmpHandler {
             icmp_tx,
             password,
-            server_ip
+            server_ip,
         }
     }
 
@@ -47,13 +49,21 @@ impl IcmpHandler {
         let mut request_packet = IcmpRequest::new(AuthenticationRequest::SIZE);
         request_packet.set_identifier(0);
         request_packet.set_payload(request_bytes.as_slice());
-        let _ = self.icmp_tx.send(Some((request_packet.to_packet(), self.server_ip)));
+        let _ = self
+            .icmp_tx
+            .send(Some((request_packet.to_packet(), self.server_ip)));
 
         let mut iterator = ipv4_packet_iter(receiver);
         let target = Instant::now() + Duration::from_secs(15);
-        while let Ok(Some((ip_packet, _))) = iterator.next_with_timeout(target.duration_since(Instant::now())) {
+        while let Ok(Some((ip_packet, _))) =
+            iterator.next_with_timeout(target.duration_since(Instant::now()))
+        {
             if let Some(echo_packet) = EchoReplyPacket::new(ip_packet.packet()) {
-                if let Ok(auth_reply) = AuthenticationReply::verified_from_bytes(echo_packet.payload(), &key, &self.password) {
+                if let Ok(auth_reply) = AuthenticationReply::verified_from_bytes(
+                    echo_packet.payload(),
+                    &key,
+                    &self.password,
+                ) {
                     let mut old_sessions = HashMap::new();
                     old_sessions.insert(auth_reply.session_id, auth_reply.session_key);
                     return Ok(AuthedIcmpHandler {
@@ -73,7 +83,7 @@ impl IcmpHandler {
         }
         Err(io::Error::new(
             io::ErrorKind::TimedOut,
-            "Time out while trying to establish a connection"
+            "Time out while trying to establish a connection",
         ))
     }
 }
@@ -102,12 +112,14 @@ impl AuthedIcmpHandler {
         let mut iterator = ipv4_packet_iter(receiver);
         while let Ok(packet) = iterator.next_with_timeout(RECV_TIMEOUT) {
             if let Ok(_) = stop_rx.try_recv() {
-                return true
+                return true;
             }
             if self.keep_alive.elapsed() > TIMEOUT {
                 // unable to refresh session in time
-                break
-            } else if self.keep_alive.elapsed() > Duration::from_secs(60) && self.timeout.elapsed() > Duration::from_secs(15) {
+                break;
+            } else if self.keep_alive.elapsed() > Duration::from_secs(60)
+                && self.timeout.elapsed() > Duration::from_secs(15)
+            {
                 self.send_keep_alive()
             }
             if let Some((ip_packet, addr)) = packet {
@@ -139,18 +151,28 @@ impl AuthedIcmpHandler {
         icmp_packet.set_identifier(self.identifier);
         icmp_packet.set_sequence_number(ids_to_sequence_number(self.client_id, session_id));
 
-        let _ = self.icmp_tx.send(Some((icmp_packet.to_packet(), self.server_ip)));
+        let _ = self
+            .icmp_tx
+            .send(Some((icmp_packet.to_packet(), self.server_ip)));
     }
 
     pub fn get_credentials(&self) -> (u8, [u8; 32]) {
-        (self.current_session_id, self.old_sessions.get(&self.current_session_id).unwrap().clone())
+        (
+            self.current_session_id,
+            self.old_sessions
+                .get(&self.current_session_id)
+                .unwrap()
+                .clone(),
+        )
     }
 
     fn handle_packet(&mut self, echo_packet: EchoReplyPacket) -> io::Result<()> {
         let (client_id, _) = sequence_number_to_ids(echo_packet.get_sequence_number());
         if client_id == self.client_id && echo_packet.payload().len() == DataPacket::SIZE {
             self.relay_data_packet(&echo_packet)?
-        } else if client_id == self.client_id && echo_packet.payload().len() == SessionExtension::SIZE {
+        } else if client_id == self.client_id
+            && echo_packet.payload().len() == SessionExtension::SIZE
+        {
             self.handle_session_extension(echo_packet)?
         }
         Ok(())
@@ -158,10 +180,16 @@ impl AuthedIcmpHandler {
 
     fn relay_data_packet(&self, echo_packet: &EchoReplyPacket) -> io::Result<()> {
         let (_, session_id) = sequence_number_to_ids(echo_packet.get_sequence_number());
-        let key = self.old_sessions.get(&session_id)
+        let key = self
+            .old_sessions
+            .get(&session_id)
             .ok_or(io::Error::new(io::ErrorKind::NotFound, "Key not found"))?;
         let data_packet = DataPacket::verified_from_bytes(echo_packet.payload(), key)?;
-        let _ = self.tunnel.as_ref().unwrap().send(data_packet.data.as_slice());
+        let _ = self
+            .tunnel
+            .as_ref()
+            .unwrap()
+            .send(data_packet.data.as_slice());
         Ok(())
     }
 
@@ -171,7 +199,11 @@ impl AuthedIcmpHandler {
         let packet = SessionExtension::verified_from_bytes(echo_packet.payload(), &key)?;
         self.current_session_id = packet.session_id;
         self.keep_alive = Instant::now();
-        let _ = self.tun_tx.as_ref().unwrap().send(Some((packet.session_id, packet.new_key)));
+        let _ = self
+            .tun_tx
+            .as_ref()
+            .unwrap()
+            .send(Some((packet.session_id, packet.new_key)));
         Ok(())
     }
 }

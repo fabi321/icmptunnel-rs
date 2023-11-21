@@ -1,22 +1,24 @@
 use crate::icmp_packets::IcmpReply;
 use crate::server::{AuthenticatedUser, UserUpdate};
-use crate::shared::packages::{AuthenticationReply, AuthenticationRequest, DataPacket, SessionExtension};
+use crate::shared::packages::{
+    AuthenticationReply, AuthenticationRequest, DataPacket, SessionExtension,
+};
+use crate::shared::{sequence_number_to_ids, RECV_TIMEOUT, TIMEOUT};
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use pnet::packet::icmp::echo_request::EchoRequestPacket;
+use pnet::packet::icmp::IcmpPacket;
 use pnet::packet::icmp::IcmpTypes::EchoRequest;
 use pnet::packet::Packet;
 use pnet::transport::{ipv4_packet_iter, TransportReceiver};
+use rand_core::OsRng;
 use std::collections::HashMap;
 use std::io;
 use std::net::IpAddr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
-use pnet::packet::icmp::IcmpPacket;
-use rand_core::OsRng;
 use tun_tap::Iface;
 use x25519_dalek::{EphemeralSecret, PublicKey};
-use crate::shared::{RECV_TIMEOUT, sequence_number_to_ids, TIMEOUT};
 
 pub struct IcmpHandler {
     icmp_tx: Sender<Option<(IcmpPacket<'static>, IpAddr)>>,
@@ -47,14 +49,13 @@ impl IcmpHandler {
 
     pub fn run(&mut self, mut receiver: TransportReceiver) {
         let mut iterator = ipv4_packet_iter(&mut receiver);
-        let mut last_update =Instant::now();
+        let mut last_update = Instant::now();
 
         while let Ok(value) = iterator.next_with_timeout(RECV_TIMEOUT) {
             if let Ok(_) = self.stop_rx.try_recv() {
                 break;
             }
             if let Some((ip_packet, addr)) = value {
-
                 if let Some(echo_packet) = EchoRequestPacket::new(ip_packet.packet()) {
                     if echo_packet.get_icmp_type() == EchoRequest {
                         self.handle_packet(echo_packet, addr);
@@ -70,11 +71,9 @@ impl IcmpHandler {
     }
 
     fn handle_packet(&mut self, echo_packet: EchoRequestPacket, addr: IpAddr) {
-        let error = if echo_packet.payload().len() == DataPacket::SIZE
-        {
+        let error = if echo_packet.payload().len() == DataPacket::SIZE {
             self.relay_data_packet(&echo_packet, addr)
-        } else if echo_packet.payload().len() == AuthenticationRequest::SIZE
-        {
+        } else if echo_packet.payload().len() == AuthenticationRequest::SIZE {
             self.perform_handshake(&echo_packet, addr)
         } else if echo_packet.payload().len() == SessionExtension::SIZE {
             self.extend_session(&echo_packet, addr)
@@ -109,12 +108,23 @@ impl IcmpHandler {
         Ok(())
     }
 
-    fn get_key_and_update_client(&mut self, echo_packet: &EchoRequestPacket, sender: IpAddr) -> io::Result<([u8; 32], u16)> {
+    fn get_key_and_update_client(
+        &mut self,
+        echo_packet: &EchoRequestPacket,
+        sender: IpAddr,
+    ) -> io::Result<([u8; 32], u16)> {
         let (client_id, session_id) = sequence_number_to_ids(echo_packet.get_sequence_number());
-        let client = self.authenticated.get_mut(&client_id)
-            .ok_or(io::Error::new(io::ErrorKind::NotFound, "client id not found"))?;
-        let (key, _) = client.session_keys.get(&session_id)
-            .ok_or(io::Error::new(io::ErrorKind::NotFound, "session id not found"))?;
+        let client = self
+            .authenticated
+            .get_mut(&client_id)
+            .ok_or(io::Error::new(
+                io::ErrorKind::NotFound,
+                "client id not found",
+            ))?;
+        let (key, _) = client.session_keys.get(&session_id).ok_or(io::Error::new(
+            io::ErrorKind::NotFound,
+            "session id not found",
+        ))?;
         // Update address if changed
         if client.address != sender {
             client.address = sender;
@@ -122,13 +132,19 @@ impl IcmpHandler {
         }
         if client.identifier != echo_packet.get_identifier() {
             client.identifier = echo_packet.get_identifier();
-            let _ = self.tun_tx.send(UserUpdate::IdentifierChanged(client_id, client.identifier));
+            let _ = self
+                .tun_tx
+                .send(UserUpdate::IdentifierChanged(client_id, client.identifier));
         }
         Ok((key.clone(), client.identifier))
     }
 
     /// Relays a data packet from icmp to tun
-    fn relay_data_packet(&mut self, echo_packet: &EchoRequestPacket, sender: IpAddr) -> io::Result<()> {
+    fn relay_data_packet(
+        &mut self,
+        echo_packet: &EchoRequestPacket,
+        sender: IpAddr,
+    ) -> io::Result<()> {
         let (key, _) = self.get_key_and_update_client(echo_packet, sender)?;
         let packet = DataPacket::verified_from_bytes(echo_packet.payload(), &key)?;
         self.tunnel.send(packet.data.as_slice())?;
@@ -144,11 +160,17 @@ impl IcmpHandler {
         println!("performing handshake");
 
         // verify package and password
-        let request = AuthenticationRequest::verified_from_bytes(echo_packet.payload(), &self.password)?;
+        let request =
+            AuthenticationRequest::verified_from_bytes(echo_packet.payload(), &self.password)?;
 
         // Get next available client id
-        let client_id = (2..255u8).filter(|v| !self.authenticated.contains_key(v)).next()
-            .ok_or(io::Error::new(io::ErrorKind::AddrInUse, "No available client id"))?;
+        let client_id = (2..255u8)
+            .filter(|v| !self.authenticated.contains_key(v))
+            .next()
+            .ok_or(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "No available client id",
+            ))?;
 
         // Generate Diffie Hellman key pair and shared secret
         let private_key = EphemeralSecret::random_from_rng(&mut OsRng);
@@ -160,7 +182,8 @@ impl IcmpHandler {
         let session_key = ChaCha20Poly1305::generate_key(&mut OsRng);
 
         // Send icmp reply
-        let auth_reply = AuthenticationReply::new(public_key, client_id, session_id, session_key.as_ref());
+        let auth_reply =
+            AuthenticationReply::new(public_key, client_id, session_id, session_key.as_ref());
         let payload = auth_reply.to_bytes(&shared_secret, &self.password);
 
         let mut reply = IcmpReply::new(AuthenticationReply::SIZE);
@@ -183,22 +206,23 @@ impl IcmpHandler {
             identifier: echo_packet.get_identifier(),
         };
         self.authenticated.insert(client_id, user.clone());
-        let _ = self.tun_tx.send(UserUpdate::AddUser {
-            client_id,
-            user,
-        });
+        let _ = self.tun_tx.send(UserUpdate::AddUser { client_id, user });
         Ok(())
     }
 
-    fn extend_session(&mut self, echo_packet: &EchoRequestPacket,
-        sender: IpAddr,) -> io::Result<()> {
+    fn extend_session(
+        &mut self,
+        echo_packet: &EchoRequestPacket,
+        sender: IpAddr,
+    ) -> io::Result<()> {
         println!("handling session extension");
         let (key, identifier) = self.get_key_and_update_client(echo_packet, sender)?;
         let packet = SessionExtension::verified_from_bytes(echo_packet.payload(), &key)?;
         let (user_id, _) = sequence_number_to_ids(echo_packet.get_sequence_number());
         if let Some(user) = self.authenticated.get_mut(&user_id) {
             user.keep_alive = Instant::now();
-            user.session_keys.insert(packet.session_id, (packet.new_key, Instant::now()));
+            user.session_keys
+                .insert(packet.session_id, (packet.new_key, Instant::now()));
         }
         let _ = self.tun_tx.send(UserUpdate::AddSession {
             client_id: user_id,
