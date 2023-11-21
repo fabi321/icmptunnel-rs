@@ -1,6 +1,7 @@
 # Icmptunnel-rs
 
-A rust implementation of an icmp tunnel, complete with authentication and encryption
+A rust implementation of an icmp tunnel, complete with authentication and encryption. Inspired by
+https://github.com/DhavalKapil/icmptunnel
 
 # Quickstart
 
