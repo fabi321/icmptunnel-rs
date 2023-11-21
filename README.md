@@ -10,6 +10,10 @@ git clone https://github.com/fabi321/icmptunnel-rs.git
 cd icmptunnel-rs
 cargo build --release
 ```
+or
+```commandline
+cargo install icmptunnel-rs
+```
 
 running the server
 
