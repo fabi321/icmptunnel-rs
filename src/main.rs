@@ -18,6 +18,9 @@ enum Commands {
         #[clap(short, long)]
         /// Server password
         password: String,
+        /// Skip setting up a default route (will just add a new network device tun0)
+        #[clap(short = 'r', long)]
+        skip_route: bool,
     },
     Server {
         #[clap(short, long)]
@@ -33,6 +36,7 @@ fn main() {
         Commands::Client {
             server_address,
             password,
-        } => start_client(server_address, password),
+            skip_route,
+        } => start_client(server_address, password, !skip_route),
     }
 }

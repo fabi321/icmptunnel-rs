@@ -11,24 +11,38 @@ use tun_tap::{Iface, Mode};
 mod icmp_handler;
 mod tun_handler;
 
-pub fn start_client(server_address: IpAddr, password: String) {
+pub fn start_client(server_address: IpAddr, password: String, setup_route: bool) {
     let (mut transport_tx, mut transport_rx) = get_transport_channel();
     let (icmp_tx, icmp_rx) = channel();
     let (stop_tx, stop_rx) = channel();
     let mut icmp_handler = IcmpHandler::new(icmp_tx.clone(), password, server_address);
 
-    let (gateway, interface) =
-        configure_network::get_gateway_interface().expect("Error getting default route");
-    let icmp_tx_clone = icmp_tx.clone();
-    let gateway_clone = gateway.clone();
-    let interface_clone = interface.clone();
-    ctrlc::set_handler(move || {
-        configure_network::restore_client_network(gateway_clone.clone(), interface_clone.clone())
+    let network = if setup_route {
+        let (gateway, interface) =
+            configure_network::get_gateway_interface().expect("Error getting default route");
+        let icmp_tx_clone = icmp_tx.clone();
+        let gateway_clone = gateway.clone();
+        let interface_clone = interface.clone();
+        ctrlc::set_handler(move || {
+            configure_network::restore_client_network(
+                gateway_clone.clone(),
+                interface_clone.clone(),
+            )
             .expect("Error while restoring network configuration");
-        stop_tx.send(()).expect("couldn't send stop signal");
-        icmp_tx_clone.send(None).expect("couldn't send stop signal");
-    })
-    .expect("Error while setting up sigint handler");
+            stop_tx.send(()).expect("couldn't send stop signal");
+            icmp_tx_clone.send(None).expect("couldn't send stop signal");
+        })
+        .expect("Error while setting up sigint handler");
+        Some((gateway, interface))
+    } else {
+        let icmp_tx_clone = icmp_tx.clone();
+        ctrlc::set_handler(move || {
+            stop_tx.send(()).expect("couldn't send stop signal");
+            icmp_tx_clone.send(None).expect("couldn't send stop signal");
+        })
+        .expect("Error while setting up sigint handler");
+        None
+    };
 
     let icmp_send_thread = thread::spawn(move || {
         while let Ok(Some((packet, addr))) = icmp_rx.recv() {
@@ -73,8 +87,10 @@ pub fn start_client(server_address: IpAddr, password: String) {
                 if stop { "interrupt" } else { "timeout" }
             );
 
-            configure_network::restore_client_network(gateway.clone(), interface.clone())
-                .expect("could not restore network");
+            if let Some((gateway, interface)) = &network {
+                configure_network::restore_client_network(gateway.clone(), interface.clone())
+                    .expect("could not restore network");
+            }
 
             tun_tx.send(None).expect("could not stop tun thread");
             tun_thread.join().unwrap();
