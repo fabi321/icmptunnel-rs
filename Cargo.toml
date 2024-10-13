@@ -8,8 +8,8 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-pnet = "0.34.0"
-pnet_sys = "0.34.0"
+pnet = "0.35.0"
+pnet_sys = "0.35.0"
 tun-tap = "0.1.4"
 chacha20poly1305 = "0.10.1"
 ctrlc = "3.4.0"
