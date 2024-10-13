@@ -53,7 +53,7 @@ pub fn get_gateway_interface() -> io::Result<(String, String)> {
         if line.starts_with("0.0.0.0") {
             let columns = line
                 .split(" ")
-                .filter(|s| s.len() > 0)
+                .filter(|s| !s.is_empty())
                 .collect::<Vec<&str>>();
             let gateway = columns[1];
             let interface = columns[columns.len() - 1];

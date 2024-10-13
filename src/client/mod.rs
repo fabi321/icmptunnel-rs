@@ -37,7 +37,7 @@ pub fn start_client(server_address: IpAddr, password: String) {
     });
 
     loop {
-        if let Ok(_) = stop_rx.try_recv() {
+        if stop_rx.try_recv().is_ok() {
             break;
         }
         println!("authenticating");

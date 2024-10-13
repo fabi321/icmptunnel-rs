@@ -16,7 +16,7 @@ use x25519_dalek::{PublicKey, ReusableSecret, SharedSecret};
 
 fn hash_password_and_key(password: &str, key: &PublicKey) -> GenericArray<u8, U64> {
     // Initialize hasher
-    let mut hasher = Sha3_512::new();
+    let mut hasher = Sha3_512::default();
 
     // Feed data
     hasher.update(password.as_bytes());
@@ -128,7 +128,7 @@ impl AuthenticationReply {
             dh_key,
             client_id,
             session_id,
-            session_key: session_key.clone(),
+            session_key: *session_key,
         }
     }
 

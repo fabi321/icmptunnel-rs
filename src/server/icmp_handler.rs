@@ -52,7 +52,7 @@ impl IcmpHandler {
         let mut last_update = Instant::now();
 
         while let Ok(value) = iterator.next_with_timeout(RECV_TIMEOUT) {
-            if let Ok(_) = self.stop_rx.try_recv() {
+            if self.stop_rx.try_recv().is_ok() {
                 break;
             }
             if let Some((ip_packet, addr)) = value {
@@ -136,7 +136,7 @@ impl IcmpHandler {
                 .tun_tx
                 .send(UserUpdate::IdentifierChanged(client_id, client.identifier));
         }
-        Ok((key.clone(), client.identifier))
+        Ok((*key, client.identifier))
     }
 
     /// Relays a data packet from icmp to tun
@@ -165,8 +165,7 @@ impl IcmpHandler {
 
         // Get next available client id
         let client_id = (2..255u8)
-            .filter(|v| !self.authenticated.contains_key(v))
-            .next()
+            .find(|v| !self.authenticated.contains_key(v))
             .ok_or(io::Error::new(
                 io::ErrorKind::AddrInUse,
                 "No available client id",

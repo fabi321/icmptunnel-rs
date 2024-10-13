@@ -112,7 +112,7 @@ impl AuthedIcmpHandler {
     pub fn run(&mut self, receiver: &mut TransportReceiver, stop_rx: &Receiver<()>) -> bool {
         let mut iterator = ipv4_packet_iter(receiver);
         while let Ok(packet) = iterator.next_with_timeout(RECV_TIMEOUT) {
-            if let Ok(_) = stop_rx.try_recv() {
+            if stop_rx.try_recv().is_ok() {
                 return true;
             }
             if self.keep_alive.elapsed() > TIMEOUT {
@@ -160,10 +160,7 @@ impl AuthedIcmpHandler {
     pub fn get_credentials(&self) -> (u8, [u8; 32]) {
         (
             self.current_session_id,
-            self.old_sessions
-                .get(&self.current_session_id)
-                .unwrap()
-                .clone(),
+            *self.old_sessions.get(&self.current_session_id).unwrap(),
         )
     }
 
