@@ -10,7 +10,7 @@ use pnet::packet::icmp::IcmpPacket;
 use pnet::packet::icmp::IcmpTypes::EchoRequest;
 use pnet::packet::Packet;
 use pnet::transport::{ipv4_packet_iter, TransportReceiver};
-use rand_core::OsRng;
+use rand::thread_rng;
 use std::collections::HashMap;
 use std::io;
 use std::net::IpAddr;
@@ -173,13 +173,13 @@ impl IcmpHandler {
             ))?;
 
         // Generate Diffie Hellman key pair and shared secret
-        let private_key = EphemeralSecret::random_from_rng(&mut OsRng);
+        let private_key = EphemeralSecret::random_from_rng(thread_rng());
         let public_key = PublicKey::from(&private_key);
         let shared_secret = private_key.diffie_hellman(&request.dh_key);
 
         // Generate session key
         let session_id = 1u8;
-        let session_key = ChaCha20Poly1305::generate_key(&mut OsRng);
+        let session_key = ChaCha20Poly1305::generate_key(thread_rng());
 
         // Send icmp reply
         let auth_reply =

@@ -8,7 +8,8 @@ use pnet::packet::icmp::IcmpPacket;
 use pnet::packet::icmp::IcmpTypes::EchoReply;
 use pnet::packet::Packet;
 use pnet::transport::{ipv4_packet_iter, TransportReceiver};
-use rand_core::{OsRng, RngCore};
+use rand::thread_rng;
+use rand_core::RngCore;
 use std::collections::HashMap;
 use std::io;
 use std::net::IpAddr;
@@ -40,7 +41,7 @@ impl IcmpHandler {
 
     pub fn auth(&mut self, receiver: &mut TransportReceiver) -> io::Result<AuthedIcmpHandler> {
         // generate key pair
-        let key = ReusableSecret::random_from_rng(&mut OsRng);
+        let key = ReusableSecret::random_from_rng(thread_rng());
         let pub_key = PublicKey::from(&key);
 
         // pack key into auth request packet and send it
@@ -76,7 +77,7 @@ impl IcmpHandler {
                         timeout: Instant::now(),
                         tunnel: None,
                         tun_tx: None,
-                        identifier: OsRng.next_u32() as u16,
+                        identifier: thread_rng().next_u32() as u16,
                     });
                 }
             }
@@ -140,7 +141,7 @@ impl AuthedIcmpHandler {
         self.timeout = Instant::now();
         let new_session_id = self.current_session_id.wrapping_add(1);
         let mut new_key = [0u8; 32];
-        OsRng.fill_bytes(&mut new_key[..]);
+        thread_rng().fill_bytes(&mut new_key[..]);
         self.old_sessions.insert(new_session_id, new_key);
         let packet = SessionExtension::new(new_key, new_session_id);
         let (session_id, key) = self.get_credentials();

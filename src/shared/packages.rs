@@ -3,9 +3,10 @@ use crate::constants::{
     MAX_PAYLOAD_SIZE,
 };
 use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    aead::{Aead, AeadCore, KeyInit},
     ChaCha20Poly1305,
 };
+use rand::thread_rng;
 use rand_core::RngCore;
 use sha3::digest::consts::U64;
 use sha3::digest::generic_array::GenericArray;
@@ -32,7 +33,7 @@ fn encrypt_data<const S: usize, const O: usize>(plaintext: [u8; S], key: &[u8; 3
         "Invalid input and output size"
     );
     let mut result = [0u8; O];
-    let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let nonce = ChaCha20Poly1305::generate_nonce(&mut thread_rng());
     result[..CHACHA20_NONCE_SIZE].copy_from_slice(nonce.as_slice());
 
     // encrypt plaintext and add to end
@@ -273,7 +274,7 @@ impl DataPacket {
 
         // fill unused bytes with random data to prevent known plaintext attacks due to constant
         // size packets
-        OsRng.fill_bytes(&mut plaintext[2 + self.data.len()..]);
+        thread_rng().fill_bytes(&mut plaintext[2 + self.data.len()..]);
 
         Ok(encrypt_data(plaintext, key))
     }
@@ -302,10 +303,11 @@ mod tests {
 
     #[test]
     fn test_handshake() {
-        let alice_private_key = ReusableSecret::random_from_rng(&mut OsRng);
+        let mut rng = thread_rng();
+        let alice_private_key = ReusableSecret::random_from_rng(&mut rng);
         let alice_pub_key = PublicKey::from(&alice_private_key);
         let password = "password".to_string();
-        let alice_auth_request = AuthenticationRequest::new(alice_pub_key.clone());
+        let alice_auth_request = AuthenticationRequest::new(alice_pub_key);
         let auth_request_bytes = alice_auth_request.clone().to_bytes(&password);
         assert_eq!(auth_request_bytes.len(), AuthenticationRequest::SIZE);
         let bob_auth_request =
@@ -315,10 +317,10 @@ mod tests {
             alice_auth_request, bob_auth_request,
             "Received auth request differs from sent auth request"
         );
-        let bob_private_key = EphemeralSecret::random_from_rng(&mut OsRng);
+        let bob_private_key = EphemeralSecret::random_from_rng(&mut rng);
         let bob_public_key = PublicKey::from(&bob_private_key);
         let bob_shared_key = bob_private_key.diffie_hellman(&bob_auth_request.dh_key);
-        let bob_auth_reply = AuthenticationReply::new(bob_public_key.clone(), 1, 2, &[0u8; 32]);
+        let bob_auth_reply = AuthenticationReply::new(bob_public_key, 1, 2, &[0u8; 32]);
         let auth_reply_bytes = bob_auth_reply.clone().to_bytes(&bob_shared_key, &password);
         assert_eq!(auth_reply_bytes.len(), AuthenticationReply::SIZE);
         let alice_auth_reply = AuthenticationReply::verified_from_bytes(
@@ -335,20 +337,20 @@ mod tests {
 
     #[test]
     fn test_mallory() {
-        let alice_private_key = ReusableSecret::random_from_rng(&mut OsRng);
+        let mut rng = thread_rng();
+        let alice_private_key = ReusableSecret::random_from_rng(&mut rng);
         let alice_pub_key = PublicKey::from(&alice_private_key);
         let password = "password".to_string();
-        let alice_auth_request = AuthenticationRequest::new(alice_pub_key.clone());
+        let alice_auth_request = AuthenticationRequest::new(alice_pub_key);
         let auth_request_bytes = alice_auth_request.clone().to_bytes(&password);
         // Mallory only knows pub key of alice and uses a different password
         let dh_bytes: [u8; 32] = (&auth_request_bytes[..32]).try_into().unwrap();
         let dh_key = PublicKey::from(dh_bytes);
         let mallory_password = "different password".to_string();
-        let mallory_private_key = EphemeralSecret::random_from_rng(&mut OsRng);
+        let mallory_private_key = EphemeralSecret::random_from_rng(&mut rng);
         let mallory_public_key = PublicKey::from(&mallory_private_key);
         let mallory_shared_key = mallory_private_key.diffie_hellman(&dh_key);
-        let mallory_auth_reply =
-            AuthenticationReply::new(mallory_public_key.clone(), 1, 2, &[0u8; 32]);
+        let mallory_auth_reply = AuthenticationReply::new(mallory_public_key, 1, 2, &[0u8; 32]);
         let auth_reply_bytes = mallory_auth_reply
             .clone()
             .to_bytes(&mallory_shared_key, &mallory_password);
@@ -365,6 +367,7 @@ mod tests {
 
     #[test]
     fn test_short_byte_inputs() {
+        let mut rng = thread_rng();
         let password = "password".to_string();
         let result = AuthenticationRequest::verified_from_bytes(
             &[0u8; AuthenticationRequest::SIZE - 1],
@@ -382,7 +385,7 @@ mod tests {
             result.is_err(),
             "AuthenticationRequest accepted too long packet"
         );
-        let key = ReusableSecret::random_from_rng(&mut OsRng);
+        let key = ReusableSecret::random_from_rng(&mut rng);
         let result = AuthenticationReply::verified_from_bytes(
             &[0u8; AuthenticationReply::SIZE - 1],
             &key,
@@ -392,7 +395,7 @@ mod tests {
             result.is_err(),
             "AuthenticationReply accepted too short packet"
         );
-        let key = ReusableSecret::random_from_rng(&mut OsRng);
+        let key = ReusableSecret::random_from_rng(&mut rng);
         let result = AuthenticationReply::verified_from_bytes(
             &[0u8; AuthenticationReply::SIZE + 1],
             &key,
@@ -406,7 +409,8 @@ mod tests {
 
     #[test]
     fn test_data_packet() {
-        let key: [u8; 32] = *ChaCha20Poly1305::generate_key(&mut OsRng).as_ref();
+        let mut rng = thread_rng();
+        let key: [u8; 32] = *ChaCha20Poly1305::generate_key(&mut rng).as_ref();
         let data = Vec::from([0u8; MAX_PAYLOAD_SIZE + 1].as_slice());
         let packet = DataPacket::new(data);
         let result = packet.to_bytes(&key);
