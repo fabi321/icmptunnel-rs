@@ -105,7 +105,7 @@ impl IcmpTooBig {
     }
 
     pub fn set_next_hop_max_mtu(&mut self, mtu: u16) {
-        self.packet.set_unused(mtu as u32);
+        self.packet.set_unused(mtu);
     }
 
     pub fn to_packet(mut self) -> IcmpPacket<'static> {
